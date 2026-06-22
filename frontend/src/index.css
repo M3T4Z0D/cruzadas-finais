@@ -36,6 +36,7 @@
   --cell-active: rgba(77, 83, 130, 0.15);
   --arrow-color: var(--color-dusty-grape);
   
+  --neutral-gray: #9ca3af;
   --font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --card-shadow: 0 8px 32px 0 rgba(77, 83, 130, 0.12);
 }

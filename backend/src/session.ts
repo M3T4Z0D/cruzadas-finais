@@ -1,6 +1,6 @@
 import { GeneratedBoard, generateBoardForElo } from "./generator";
 import { updateRatings } from "./elo";
-import { recordWordAttempt } from "./dictionary";
+import { wordsDatabase, recordWordAttempt } from "./dictionary";
 
 export interface SessionPlayer {
   id: string;
@@ -195,24 +195,20 @@ export function validateClueAttempt(
         const clueMetadata = session.board.clues.find(c => c.id === clueId);
         const assignedWord = session.board.solutions[clueId];
         
-        // Find dict word
-        const dictionary = require("./dictionary"); // Dynamic import to prevent circular dependency
-        const dictWord = dictionary.wordsDatabase.find((w: any) => w.word === assignedWord);
+        const dictWord = wordsDatabase.find(w => w.word === assignedWord);
 
         if (dictWord) {
-          // Adjust Ratings
           const { newPlayerRating, newWordRating } = updateRatings(
             player.elo,
             dictWord.elo,
-            1.0 // Win for Player
+            1.0
           );
 
           const playerEloChange = newPlayerRating - player.elo;
           const wordEloChange = newWordRating - dictWord.elo;
 
-          // Commit to player and dictionary
           player.elo = newPlayerRating;
-          dictionary.recordWordAttempt(dictWord.id, true, newWordRating);
+          recordWordAttempt(dictWord.id, true, newWordRating);
 
           const isBoardComplete = session.solvedClues.length === session.board.clues.length;
 
@@ -233,21 +229,20 @@ export function validateClueAttempt(
     // For words, we record an attempt with failure (so word rating goes up!)
     if (session.mode === "ranked") {
       const assignedWord = session.board.solutions[clueId];
-      const dictionary = require("./dictionary");
-      const dictWord = dictionary.wordsDatabase.find((w: any) => w.word === assignedWord);
+      const dictWord = wordsDatabase.find(w => w.word === assignedWord);
 
       if (dictWord) {
         const { newPlayerRating, newWordRating } = updateRatings(
           player.elo,
           dictWord.elo,
-          0.0 // Loss for Player
+          0.0
         );
 
         const playerEloChange = newPlayerRating - player.elo;
         const wordEloChange = newWordRating - dictWord.elo;
 
         player.elo = newPlayerRating;
-        dictionary.recordWordAttempt(dictWord.id, false, newWordRating);
+        recordWordAttempt(dictWord.id, false, newWordRating);
 
         return {
           success: false,

@@ -138,9 +138,13 @@ export function generateBoardForElo(targetElo, preferredTemplateId) {
     totalElo += dictWord.elo;
     solutionsMap[slot.id] = assignedWord;
 
+    const selectedClue = (dictWord.clues && dictWord.clues.length > 0)
+      ? dictWord.clues[Math.floor(Math.random() * dictWord.clues.length)]
+      : "Sem dica cadastrada";
+
     cluesList.push({
       id: slot.id,
-      clueText: dictWord.clue,
+      clueText: selectedClue,
       direction: slot.direction,
       arrowDirection: slot.arrowDirection,
       clueRow: slot.clueRow,
@@ -187,10 +191,15 @@ function getFallbackBoard(template) {
   const selectedSolutions = fallbackSolutions[template.id] || fallbackSolutions["template_7x7"];
   const cluesList = template.slots.map(slot => {
     const word = selectedSolutions[slot.id];
-    const dictWord = wordsDatabase.find(w => w.word === word) || { clue: "Palavra padrão do sistema", elo: 1200 };
+    const dictWord = wordsDatabase.find(w => w.word === word) || { clues: ["Palavra padrão do sistema"], elo: 1200 };
+    
+    const selectedClue = (dictWord.clues && dictWord.clues.length > 0)
+      ? dictWord.clues[Math.floor(Math.random() * dictWord.clues.length)]
+      : dictWord.clue || "Palavra padrão do sistema";
+
     return {
       id: slot.id,
-      clueText: dictWord.clue,
+      clueText: selectedClue,
       direction: slot.direction,
       arrowDirection: slot.arrowDirection,
       clueRow: slot.clueRow,

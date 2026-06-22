@@ -1,0 +1,14 @@
+{
+  "name": "cruzadas-diretas-ranqueadas",
+  "version": "1.0.0",
+  "description": "Sistema de Cruzadas Diretas Ranqueadas - Monorepo",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "cd backend && node dist/index.js",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+  }
+}

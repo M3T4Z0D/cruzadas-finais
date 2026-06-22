@@ -1,10 +1,11 @@
 import express from "express";
 import http from "http";
+import path from "path";
 import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 
-import { wordsDatabase, initializeMissingElos } from "./dictionary";
+import { wordsDatabase, initializeMissingElos, normalizeWord, WordInfo } from "./dictionary";
 import {
   createSession,
   joinSession,
@@ -19,8 +20,10 @@ initializeMissingElos();
 
 const app = express();
 const port = process.env.PORT || 5000;
+const isProduction = process.env.NODE_ENV === "production";
+const corsOrigin = process.env.CORS_ORIGIN || "*";
 
-app.use(cors());
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
 // --- REST API ROUTES ---
@@ -34,6 +37,98 @@ app.get("/api/health", (req, res) => {
 app.get("/api/words", (req, res) => {
   res.json(wordsDatabase);
 });
+
+// Create a new word (Admin Panel)
+app.post("/api/words", (req, res) => {
+  const { displayWord, clues, elo } = req.body;
+  if (!displayWord || typeof displayWord !== "string" || displayWord.trim() === "") {
+    return res.status(400).json({ error: "O campo 'displayWord' é obrigatório e deve ser uma string não vazia." });
+  }
+  if (!clues || !Array.isArray(clues) || clues.length === 0) {
+    return res.status(400).json({ error: "O campo 'clues' é obrigatório e deve conter ao menos 1 dica." });
+  }
+
+  const normalized = normalizeWord(displayWord);
+  if (wordsDatabase.some(w => w.word === normalized)) {
+    return res.status(400).json({ error: `A palavra "${normalized}" já está cadastrada no dicionário.` });
+  }
+
+  const cleanedClues = clues.map((c: any) => String(c).trim()).filter(Boolean);
+  if (cleanedClues.length === 0) {
+    return res.status(400).json({ error: "Ao menos uma dica válida deve ser fornecida." });
+  }
+
+  const wordElo = elo && typeof elo === "number" ? elo : 1200;
+
+  const newWord: WordInfo = {
+    id: `w${Date.now()}`,
+    displayWord: displayWord.trim(),
+    word: normalized,
+    clues: cleanedClues,
+    elo: wordElo,
+    attempts: 0,
+    solves: 0
+  };
+
+  wordsDatabase.push(newWord);
+  res.status(201).json(newWord);
+});
+
+// Update an existing word (Admin Panel)
+app.put("/api/words/:id", (req, res) => {
+  const { id } = req.params;
+  const { displayWord, clues, elo } = req.body;
+
+  const wordIndex = wordsDatabase.findIndex(w => w.id === id);
+  if (wordIndex === -1) {
+    return res.status(404).json({ error: "Palavra não encontrada." });
+  }
+
+  if (displayWord !== undefined) {
+    if (typeof displayWord !== "string" || displayWord.trim() === "") {
+      return res.status(400).json({ error: "O campo 'displayWord' deve ser uma string não vazia." });
+    }
+    const normalized = normalizeWord(displayWord);
+    if (wordsDatabase.some(w => w.word === normalized && w.id !== id)) {
+      return res.status(400).json({ error: `A palavra "${normalized}" já está cadastrada em outro registro.` });
+    }
+    wordsDatabase[wordIndex].displayWord = displayWord.trim();
+    wordsDatabase[wordIndex].word = normalized;
+  }
+
+  if (clues !== undefined) {
+    if (!Array.isArray(clues) || clues.length === 0) {
+      return res.status(400).json({ error: "O campo 'clues' deve ser um array contendo ao menos 1 dica." });
+    }
+    const cleanedClues = clues.map((c: any) => String(c).trim()).filter(Boolean);
+    if (cleanedClues.length === 0) {
+      return res.status(400).json({ error: "Ao menos uma dica válida deve ser fornecida." });
+    }
+    wordsDatabase[wordIndex].clues = cleanedClues;
+  }
+
+  if (elo !== undefined) {
+    if (typeof elo !== "number") {
+      return res.status(400).json({ error: "O campo 'elo' deve ser um número." });
+    }
+    wordsDatabase[wordIndex].elo = elo;
+  }
+
+  res.json(wordsDatabase[wordIndex]);
+});
+
+// Delete a word (Admin Panel)
+app.delete("/api/words/:id", (req, res) => {
+  const { id } = req.params;
+  const wordIndex = wordsDatabase.findIndex(w => w.id === id);
+  if (wordIndex === -1) {
+    return res.status(404).json({ error: "Palavra não encontrada." });
+  }
+
+  const deleted = wordsDatabase.splice(wordIndex, 1)[0];
+  res.json({ message: "Palavra excluída com sucesso.", word: deleted });
+});
+
 
 // Create a new session
 app.post("/api/sessions", (req, res) => {
@@ -86,12 +181,21 @@ app.get("/api/sessions/:roomId", (req, res) => {
   });
 });
 
+// Serve built frontend in production (must come after API routes)
+if (isProduction) {
+  const staticPath = path.join(__dirname, "../../frontend/dist");
+  app.use(express.static(staticPath));
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(staticPath, "index.html"));
+  });
+}
+
 // --- SOCKET.IO REALTIME EVENTS ---
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow any frontend client connection for local dev
+    origin: corsOrigin,
     methods: ["GET", "POST"],
   },
 });
@@ -104,20 +208,20 @@ io.on("connection", socket => {
 
   // 1. Join room event
   socket.on("join_room", ({ roomId, userId, username, elo }) => {
-    const session = joinSession(roomId, userId, username, elo || 1200);
+    const uppercaseRoom = (roomId as string).toUpperCase();
+    const session = joinSession(uppercaseRoom, userId, username, elo || 1200);
     if (!session) {
       socket.emit("error_msg", "A sala informada não existe.");
       return;
     }
 
-    currentRoomId = roomId.toUpperCase();
+    currentRoomId = uppercaseRoom;
     currentUserId = userId;
 
-    socket.join(currentRoomId);
-    console.log(`Player ${username} (${userId}) joined room: ${currentRoomId}`);
+    socket.join(uppercaseRoom);
+    console.log(`Player ${username} (${userId}) joined room: ${uppercaseRoom}`);
 
-    // Broadcast updated player list to everyone in the room
-    io.to(currentRoomId).emit("room_state", {
+    io.to(uppercaseRoom).emit("room_state", {
       players: session.players,
       gridState: session.gridState,
       solvedClues: session.solvedClues,
@@ -170,12 +274,17 @@ io.on("connection", socket => {
     if (result.success) {
       const session = getSession(uppercaseRoom);
       if (session) {
+        const assignedWord = session.board.solutions[clueId];
+        const dictWord = wordsDatabase.find(w => w.word === assignedWord);
+        const displayWord = dictWord ? dictWord.displayWord : assignedWord;
+
         // Broadcast word solved event to all players
         io.to(uppercaseRoom).emit("word_solved", {
           clueId,
           solvedClues: session.solvedClues,
           players: session.players, // Includes ELO updates if ranked!
-          solution: session.board.solutions[clueId], // Share solution with the room since it's correct!
+          solution: assignedWord, // Share solution with the room since it's correct!
+          displayWord: displayWord, // Accented version for presentation!
           playerEloChange: result.playerEloChange,
           wordEloChange: result.wordEloChange,
           solverId: userId,

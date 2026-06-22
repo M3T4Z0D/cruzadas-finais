@@ -13,7 +13,7 @@ import { wordsDatabase as initialWords, recordWordAttempt } from "./engine/dicti
 import { gridTemplates } from "./engine/templates";
 import { generateBoardForElo } from "./engine/generator";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "";
 
 function App() {
   // --- STATE ---
@@ -54,6 +54,16 @@ function App() {
   // Dictionary viewer state
   const [showDictionary, setShowDictionary] = useState(false);
   const [localWords, setLocalWords] = useState(initialWords);
+  const [solvedDisplayWords, setSolvedDisplayWords] = useState({}); // clueId -> displayWord
+
+  // Admin Panel states
+  const [adminSearch, setAdminSearch] = useState("");
+  const [showWordModal, setShowWordModal] = useState(false);
+  const [editingWord, setEditingWord] = useState(null);
+  const [formDisplayWord, setFormDisplayWord] = useState("");
+  const [formClues, setFormClues] = useState([""]);
+  const [formElo, setFormElo] = useState("1200");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
 
   // Theme states
   const [theme, setTheme] = useState("light"); // 'light' | 'dark' | 'newspaper'
@@ -66,6 +76,125 @@ function App() {
       document.body.classList.add("newspaper-theme");
     }
   }, [theme]);
+
+  // Load words from backend on initialization
+  useEffect(() => {
+    fetchWords();
+  }, []);
+
+  const fetchWords = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/words`);
+      if (res.ok) {
+        const data = await res.json();
+        setLocalWords(data);
+      }
+    } catch (err) {
+      console.warn("Não foi possível carregar as palavras do backend, usando dados locais.", err);
+    }
+  };
+
+  const handleOpenWordModal = (wordObj = null) => {
+    if (wordObj) {
+      setEditingWord(wordObj);
+      setFormDisplayWord(wordObj.displayWord || wordObj.word);
+      setFormClues(wordObj.clues && wordObj.clues.length > 0 ? [...wordObj.clues] : [wordObj.clue || ""]);
+      setFormElo(String(wordObj.elo));
+    } else {
+      setEditingWord(null);
+      setFormDisplayWord("");
+      setFormClues([""]);
+      setFormElo("1200");
+    }
+    setShowWordModal(true);
+  };
+
+  const handleAddFormClue = () => {
+    setFormClues(prev => [...prev, ""]);
+  };
+
+  const handleRemoveFormClue = (idx) => {
+    setFormClues(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleFormClueChange = (idx, val) => {
+    setFormClues(prev => {
+      const copy = [...prev];
+      copy[idx] = val;
+      return copy;
+    });
+  };
+
+  const normalizeDisplayWord = (str) => {
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z]/g, "")
+      .toUpperCase();
+  };
+
+  const handleSaveWord = async (e) => {
+    e.preventDefault();
+    if (!formDisplayWord.trim()) return;
+    const cleanedClues = formClues.map(c => c.trim()).filter(Boolean);
+    if (cleanedClues.length === 0) {
+      showToast("Adicione pelo menos uma dica válida.", "error");
+      return;
+    }
+
+    const payload = {
+      displayWord: formDisplayWord.trim(),
+      clues: cleanedClues,
+      elo: Number(formElo) || 1200
+    };
+
+    try {
+      let res;
+      if (editingWord) {
+        res = await fetch(`${BACKEND_URL}/api/words/${editingWord.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } else {
+        res = await fetch(`${BACKEND_URL}/api/words`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      }
+
+      if (res.ok) {
+        showToast(editingWord ? "Palavra atualizada com sucesso!" : "Palavra cadastrada com sucesso!", "success");
+        setShowWordModal(false);
+        fetchWords();
+      } else {
+        const errorData = await res.json();
+        showToast(errorData.error || "Erro ao salvar a palavra.", "error");
+      }
+    } catch (err) {
+      showToast("Não foi possível salvar a palavra no servidor.", "error");
+    }
+  };
+
+  const handleDeleteWord = async (wordId) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/words/${wordId}`, {
+        method: "DELETE"
+      });
+
+      if (res.ok) {
+        showToast("Palavra excluída com sucesso!", "success");
+        setShowDeleteConfirm(null);
+        fetchWords();
+      } else {
+        const errorData = await res.json();
+        showToast(errorData.error || "Erro ao excluir a palavra.", "error");
+      }
+    } catch (err) {
+      showToast("Não foi possível conectar ao servidor para excluir a palavra.", "error");
+    }
+  };
 
   const socketRef = useRef(null);
   const inputRefs = useRef({}); // Stores cell-input element refs
@@ -114,10 +243,13 @@ function App() {
       }));
     });
 
-    socketRef.current.on("word_solved", ({ clueId, solvedClues: solved, players: updatedPlayers, solution, playerEloChange, wordEloChange, solverId }) => {
+    socketRef.current.on("word_solved", ({ clueId, solvedClues: solved, players: updatedPlayers, solution, displayWord, playerEloChange, wordEloChange, solverId }) => {
       setSolvedClues(solved);
       setPlayers(updatedPlayers);
       setValidationStatuses(prev => ({ ...prev, [clueId]: "correct" }));
+      if (displayWord) {
+        setSolvedDisplayWords(prev => ({ ...prev, [clueId]: displayWord }));
+      }
 
       // Fill in correct word letters to grid
       const solvedClue = board?.clues.find(c => c.id === clueId);
@@ -443,6 +575,7 @@ function App() {
     setGrid(initialGrid);
     
     setSolvedClues([]);
+    setSolvedDisplayWords({});
     setPlayers([{ id: user.id, username: user.username, elo: user.elo, color: "#FF5733" }]);
     setCurrentView("game");
     setIsBoardCompleted(false);
@@ -656,9 +789,12 @@ function App() {
           const next = [...prev, clue.id];
           setValidationStatuses(prevS => ({ ...prevS, [clue.id]: "correct" }));
           
+          const dictWord = localWords.find(w => w.word === correctWord);
+          const solvedDisplay = dictWord ? (dictWord.displayWord || dictWord.word) : correctWord;
+          setSolvedDisplayWords(prevS => ({ ...prevS, [clue.id]: solvedDisplay }));
+
           let eloText = "";
           if (gameMode === "ranked") {
-            const dictWord = localWords.find(w => w.word === correctWord);
             if (dictWord) {
               const { newPlayerRating, newWordRating } = updateRatings(user.elo, dictWord.elo, 1.0);
               const playerEloChange = newPlayerRating - user.elo;
@@ -670,7 +806,7 @@ function App() {
             }
           }
 
-          showToast(`Correto! Resolveu a palavra "${correctWord}"!${eloText}`, "success");
+          showToast(`Correto! Resolveu a palavra "${solvedDisplay}"!${eloText}`, "success");
 
           // Check if board fully solved
           if (next.length === board.clues.length) {
@@ -767,6 +903,15 @@ function App() {
 
   const activeLeague = user ? getLeagueTier(user.elo) : null;
 
+  const filteredWords = localWords.filter(w => {
+    const term = adminSearch.toLowerCase().trim();
+    if (!term) return true;
+    const wordMatch = w.word.toLowerCase().includes(term);
+    const displayMatch = w.displayWord && w.displayWord.toLowerCase().includes(term);
+    const clueMatch = w.clues && w.clues.some(c => c.toLowerCase().includes(term));
+    return wordMatch || displayMatch || clueMatch;
+  });
+
   return (
     <div className="app-container fade-in-up">
       {/* Toast Notification */}
@@ -840,6 +985,30 @@ function App() {
                   <small>{socketConnected ? "Servidor Remoto Conectado" : "Motor Standalone Local Ativo"}</small>
                 </div>
               </div>
+            </div>
+
+            <div className="header-nav-tabs">
+              <button 
+                className={`header-tab-btn ${currentView === "dashboard" ? "active" : ""}`}
+                onClick={() => {
+                  setCurrentView("dashboard");
+                  setBoard(null);
+                }}
+              >
+                <Trophy size={14} />
+                <span>Dashboard</span>
+              </button>
+              <button 
+                className={`header-tab-btn ${currentView === "admin" ? "active" : ""}`}
+                onClick={() => {
+                  setCurrentView("admin");
+                  setBoard(null);
+                  fetchWords();
+                }}
+              >
+                <BookOpen size={14} />
+                <span>Painel Admin</span>
+              </button>
             </div>
 
             <div className="theme-selector-panel">
@@ -994,6 +1163,226 @@ function App() {
                 </div>
               </div>
 
+            </div>
+          )}
+
+          {/* VIEW: ADMIN PANEL */}
+          {currentView === "admin" && (
+            <div className="admin-panel fade-in-up">
+              <div className="admin-header glass-panel">
+                <div>
+                  <h3>Painel do Administrador</h3>
+                  <p>Gerencie o banco de dados de palavras, dicas e dificuldades.</p>
+                </div>
+                <button className="primary" onClick={() => handleOpenWordModal(null)}>
+                  <Plus size={16} /> Cadastrar Nova Palavra
+                </button>
+              </div>
+
+              {/* Admin Stats Grid */}
+              <div className="admin-stats-grid">
+                <div className="admin-stat-card glass-panel">
+                  <h4>Total de Palavras</h4>
+                  <p className="stat-value">{localWords.length}</p>
+                </div>
+                <div className="admin-stat-card glass-panel">
+                  <h4>Média de Dicas</h4>
+                  <p className="stat-value">
+                    {(localWords.reduce((acc, curr) => acc + (curr.clues?.length || 1), 0) / (localWords.length || 1)).toFixed(1)}
+                  </p>
+                </div>
+                <div className="admin-stat-card glass-panel">
+                  <h4>Palavras Fáceis (Elo &lt; 1100)</h4>
+                  <p className="stat-value">{localWords.filter(w => w.elo < 1100).length}</p>
+                </div>
+                <div className="admin-stat-card glass-panel">
+                  <h4>Palavras Médias (1100-1350)</h4>
+                  <p className="stat-value">{localWords.filter(w => w.elo >= 1100 && w.elo <= 1350).length}</p>
+                </div>
+                <div className="admin-stat-card glass-panel">
+                  <h4>Palavras Difíceis (Elo &gt; 1350)</h4>
+                  <p className="stat-value">{localWords.filter(w => w.elo > 1350).length}</p>
+                </div>
+              </div>
+
+              {/* Search & Word Table */}
+              <div className="admin-table-section glass-panel">
+                <div className="table-controls">
+                  <input 
+                    type="text" 
+                    placeholder="Buscar palavra ou dica..." 
+                    value={adminSearch} 
+                    onChange={(e) => setAdminSearch(e.target.value)} 
+                    className="admin-search-input"
+                  />
+                </div>
+
+                <div className="admin-table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Palavra (Exibição)</th>
+                        <th>Normalizada</th>
+                        <th>Dificuldade (ELO)</th>
+                        <th>Dicas Cadastradas</th>
+                        <th>Taxa de Acerto</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredWords.map(w => {
+                        const solveRate = w.attempts > 0 ? Math.round((w.solves / w.attempts) * 100) : 0;
+                        return (
+                          <tr key={w.id}>
+                            <td><strong>{w.displayWord || w.word}</strong></td>
+                            <td><code className="normalized-code">{w.word}</code></td>
+                            <td>
+                              <span className="table-elo">{w.elo} ELO</span>
+                              <small className="badge-tier-label" style={{ color: getLeagueTier(w.elo).color, marginLeft: 8 }}>
+                                {getLeagueTier(w.elo).name}
+                              </small>
+                            </td>
+                            <td>
+                              <div className="clues-count-cell">
+                                <span>{w.clues?.length || 1} dicas</span>
+                                <div className="clues-list-preview">
+                                  {(w.clues || [w.clue]).map((c, i) => (
+                                    <div key={i} className="clue-preview-item">
+                                      • {c}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              {w.attempts > 0 ? (
+                                <span>{solveRate}% ({w.solves}/{w.attempts})</span>
+                              ) : (
+                                <span className="no-stats">-</span>
+                              )}
+                            </td>
+                            <td>
+                              <div className="actions-cell">
+                                <button className="edit-btn" onClick={() => handleOpenWordModal(w)}>Editar</button>
+                                <button className="delete-btn" onClick={() => setShowDeleteConfirm(w)}>Excluir</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filteredWords.length === 0 && (
+                        <tr>
+                          <td colSpan="6" style={{ textAlign: "center", padding: "32px" }}>
+                            Nenhuma palavra encontrada para a busca "{adminSearch}".
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* WORD MODAL */}
+              {showWordModal && (
+                <div className="overlay-solved fade-in-up" style={{ zIndex: 110 }}>
+                  <div className="solved-card glass-panel" style={{ maxWidth: "600px", width: "95%", textAlign: "left" }}>
+                    <div className="modal-header">
+                      <h3>{editingWord ? "Editar Palavra" : "Cadastrar Nova Palavra"}</h3>
+                      <button onClick={() => setShowWordModal(false)} className="close-btn"><X size={18} /></button>
+                    </div>
+
+                    <form onSubmit={handleSaveWord} className="admin-form">
+                      <div className="form-group">
+                        <label>Palavra Exibida (com acentuação se aplicável)</label>
+                        <input 
+                          type="text" 
+                          value={formDisplayWord}
+                          onChange={(e) => setFormDisplayWord(e.target.value)}
+                          placeholder="Ex: Brasília, Gato, Cérebro"
+                          required
+                          autoFocus
+                          className="admin-form-input"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>Palavra Normalizada (para o Grid)</label>
+                        <div className="normalized-preview-box">
+                          <code>{normalizeDisplayWord(formDisplayWord) || "AGUARDANDO DIGITAÇÃO..."}</code>
+                        </div>
+                        <small className="help-text">Caracteres especiais, espaços e acentos são limpos automaticamente.</small>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Dificuldade ELO (Padrão: 1200)</label>
+                        <input 
+                          type="number" 
+                          value={formElo}
+                          onChange={(e) => setFormElo(e.target.value)}
+                          placeholder="1200"
+                          min={100}
+                          max={3000}
+                          className="admin-form-input"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>Dicas do Tabuleiro (Adicione pelo menos 1)</label>
+                        <div className="form-clues-list">
+                          {formClues.map((clue, idx) => (
+                            <div key={idx} className="form-clue-row">
+                              <input 
+                                type="text" 
+                                value={clue}
+                                onChange={(e) => handleFormClueChange(idx, e.target.value)}
+                                placeholder={`Dica #${idx + 1}`}
+                                required
+                                className="admin-form-input-clue"
+                              />
+                              {formClues.length > 1 && (
+                                <button 
+                                  type="button" 
+                                  className="remove-clue-btn" 
+                                  onClick={() => handleRemoveFormClue(idx)}
+                                >
+                                  <X size={16} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <button 
+                          type="button" 
+                          className="add-clue-btn-action" 
+                          onClick={handleAddFormClue}
+                        >
+                          <Plus size={14} /> Adicionar Nova Pista
+                        </button>
+                      </div>
+
+                      <div className="form-actions">
+                        <button type="button" className="cancel-btn" onClick={() => setShowWordModal(false)}>Cancelar</button>
+                        <button type="submit" className="primary">Salvar Alterações</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* DELETE CONFIRMATION MODAL */}
+              {showDeleteConfirm && (
+                <div className="overlay-solved fade-in-up" style={{ zIndex: 110 }}>
+                  <div className="solved-card glass-panel" style={{ maxWidth: "450px" }}>
+                    <h3>Excluir Palavra?</h3>
+                    <p>Você tem certeza que deseja excluir a palavra <strong>{showDeleteConfirm.displayWord || showDeleteConfirm.word}</strong> do dicionário? Esta ação não pode ser desfeita.</p>
+                    
+                    <div className="form-actions" style={{ marginTop: 24 }}>
+                      <button className="cancel-btn" onClick={() => setShowDeleteConfirm(null)}>Cancelar</button>
+                      <button className="danger-btn" onClick={() => handleDeleteWord(showDeleteConfirm.id)}>Confirmar Exclusão</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1244,7 +1633,14 @@ function App() {
                             {isSolved && <Check size={12} />}
                           </div>
                           <div style={{ flex: 1 }}>
-                            <p className="clue-txt">"{cl.clueText}"</p>
+                            <p className="clue-txt">
+                              "{cl.clueText}"
+                              {isSolved && solvedDisplayWords[cl.id] && (
+                                <span className="solved-word-badge fade-in">
+                                  {solvedDisplayWords[cl.id]}
+                                </span>
+                              )}
+                            </p>
                             <span className="clue-dir-span">
                               {cl.direction === "horizontal" ? "Horiz." : "Vert."} • {cl.length} letras
                             </span>

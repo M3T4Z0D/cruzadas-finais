@@ -1,6 +1,6 @@
 # Walkthrough do Sistema - Cruzadas Diretas Ranqueadas
 
-Concluímos com sucesso o desenvolvimento e a customização visual do **Sistema de Cruzadas Diretas Ranqueadas**! O projeto está estruturado no seu espaço de trabalho (`cruzadas-finais`), totalmente funcional e pronto para rodar.
+Concluímos com sucesso o desenvolvimento, a customização visual e o **Painel de Administração** do **Sistema de Cruzadas Diretas Ranqueadas**! O projeto está estruturado no seu espaço de trabalho (`cruzadas-finais`), totalmente funcional e pronto para rodar.
 
 ---
 
@@ -14,25 +14,32 @@ cruzadas-finais/
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── src/
-│       ├── index.ts        (Servidor Express / Socket.io)
+│       ├── index.ts        (Servidor Express / Socket.io / Endpoints CRUD Admin)
 │       ├── elo.ts          (Cálculo matemático do Elo e pesos linguísticos)
-│       ├── dictionary.ts   (Dicionário em memória com estatísticas)
+│       ├── dictionary.ts   (Dicionário com suporte a displayWord e clues[])
 │       ├── templates.ts    (Layouts geométricos simétricos dos tabuleiros)
-│       ├── generator.ts    (Algoritmo de backtracking com CSP)
+│       ├── generator.ts    (Algoritmo de backtracking com seleção de pistas)
 │       └── session.ts      (Salas cooperativas e validação de digitação)
-└── frontend/
-    ├── package.json
-    ├── vite.config.js
-    └── src/
-        ├── App.jsx         (Dashboard, Grid, Figma Cursors, Co-op Simulator, Theme Switcher)
-        ├── App.css         (Estilização do layout, painéis e switcher)
-        ├── index.css       (Design system global, variáveis CSS e 3 Temas)
-        ├── main.jsx        (Entrada do React)
-        └── engine/         (Motor de fallback local idêntico ao backend)
-            ├── elo.js
-            ├── dictionary.js
-            ├── templates.js
-            └── generator.js
+│
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.js
+│   └── src/
+│       ├── App.jsx         (Dashboard, Grid, Painel Admin, Figma Cursors, Co-op Simulator, Theme Switcher)
+│       ├── App.css         (Estilização do layout, painéis, tabelas e modais)
+│       ├── index.css       (Design system global, variáveis CSS e 3 Temas)
+│       ├── main.jsx        (Entrada do React)
+│       └── engine/         (Motor de fallback local idêntico ao backend)
+│           ├── elo.js
+│           ├── dictionary.js
+│           ├── templates.js
+│           └── generator.js
+│
+└── docs/                     # Documentações do projeto (salvos para portabilidade)
+    ├── system_architecture.md
+    ├── implementation_plan.md
+    ├── task.md
+    └── walkthrough.md
 ```
 
 ---
@@ -70,21 +77,23 @@ Uma homenagem nostálgica aos tabuleiros impressos clássicos de jornais de pape
 
 ---
 
-## 3. Principais Funcionalidades Codificadas e Prontas
+## 3. Painel de Administração de Palavras (Nova Funcionalidade)
 
-1. **Dashboard do Jogador:** Exibição elegante do ELO atual, liga correspondente e barra de progresso visual.
-2. **Login Google Simulado:** Autenticação interativa premium demonstrando a interface de entrada rápida.
-3. **Cruzadas Diretas Interativas:**
-   - As dicas são exibidas diretamente no grid (células pretas `0`) com setas direcionais apontando a escrita.
-   - Navegação por teclado fluida com avanço inteligente e Backspace.
-4. **Validação Segura no Servidor (Anti-Cheat):**
-   - Respostas nunca são enviadas ao navegador. A validação das tentativas é feita no backend via WebSockets.
-5. **Multiplayer Cooperativo (Figma Cursors):**
-   - Sincronização em tempo real de digitação e movimentos de foco de cursor entre jogadores.
-6. **Simulador de Grupo Integrado:**
-   - Permite testar todo o fluxo Socket.io cooperativo com amigos virtuais jogando e digitando de forma independente na sua tela!
-7. **Stand-alone Fallback:**
-   - Se o backend remoto estiver offline, o frontend ativa automaticamente um **motor local** idêntico no React, permitindo jogar offline!
+Adicionamos a aba **Painel Admin** no cabeçalho superior que permite fazer o CRUD completo do dicionário sobre a API REST do servidor:
+
+1. **Normalização e Exibição Independente**:
+   * As palavras são salvas com sua acentuação e caixa originais (`displayWord`, ex: `Brasília`).
+   * O backend normaliza a palavra automaticamente (`word`, ex: `BRASILIA`) retirando acentos e cedilhas para uso na montagem e preenchimento dos tabuleiros.
+2. **Suporte a Múltiplas Dicas**:
+   * Uma única palavra agora pode ter múltiplas pistas cadastradas.
+   * Durante a geração do grid, o algoritmo sorteia dinamicamente e de forma aleatória uma das dicas cadastradas para o jogador.
+3. **Métricas Consolidadas**:
+   * Exibição em tempo real de cards contadores (total de palavras, média de dicas por palavra e separação por nível de Elo).
+4. **CRUD Completo com Interface de Alta Fidelidade**:
+   * **Adicionar/Editar (Modal)**: Permite digitar a palavra com acentos, visualizar em tempo real a prévia normalizada, definir a dificuldade Elo e adicionar ou excluir campos de dicas dinamicamente.
+   * **Excluir**: Modal de confirmação seguro para prevenir exclusões acidentais.
+5. **Revelação de Palavra Acentuada**:
+   * No grid do jogo, quando o jogador acerta e resolve uma pista, a palavra acentuada original (`displayWord`) é revelada ao lado da pista no menu lateral como um selo de verificação visual!
 
 ---
 
